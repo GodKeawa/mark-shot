@@ -115,15 +115,23 @@ if(TARGET mark-shot-translate-openai)
         plugins/translate-openai/openai_translate_plugin.h
         plugins/translate-openai/openai_translation_parser.cpp
         plugins/translate-openai/openai_translation_parser.h
+        src/providers/provider_task.cpp
+        src/providers/provider_task.h
+        src/providers/translate/translate_openai_task.cpp
+        src/providers/translate/translate_openai_task.h
+        src/providers/translate/translate_segments.cpp
+        src/ocr_result.cpp
     )
     target_include_directories(mark-shot-translate-openai-plugin-test PRIVATE
         plugins/translate-openai
         plugin-sdk
+        src
     )
     target_link_libraries(mark-shot-translate-openai-plugin-test
         PRIVATE
             mark-shot-translate-common
             Qt6::Core
+            Qt6::Gui
             Qt6::Network
             Qt6::Test
     )

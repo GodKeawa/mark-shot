@@ -132,6 +132,11 @@ void TranslateOpenAiTask::start(int timeoutMs)
 
     // 2. 解析 API 配置，配置项与环境变量兜底顺序与旧 helper 一致
     const QJsonObject config = translationConfig(m_configPath);
+    const QJsonValue extraBody = config.value(QStringLiteral("extraBody"));
+    if (!extraBody.isUndefined() && !extraBody.isObject()) {
+        failWith(QStringLiteral("translation.extraBody must be a JSON object"));
+        return;
+    }
     const QString apiBase = firstNonEmpty(
         config.value(QStringLiteral("apiBase")).toString(config.value(QStringLiteral("baseUrl")).toString()),
         {QStringLiteral("MARK_SHOT_LLM_API_BASE"),
@@ -172,18 +177,18 @@ void TranslateOpenAiTask::start(int timeoutMs)
                                    "with no markdown."),
                     QStringLiteral("Do not add explanations.")}},
         {QStringLiteral("segments"), segmentArray}};
-    const QJsonObject payload{
-        {QStringLiteral("model"), model},
-        {QStringLiteral("temperature"),
-         config.contains(QStringLiteral("temperature"))
-             ? config.value(QStringLiteral("temperature")).toDouble(0.2)
-             : 0.2},
-        {QStringLiteral("messages"),
-         QJsonArray{QJsonObject{{QStringLiteral("role"), QStringLiteral("system")},
-                                {QStringLiteral("content"), systemPrompt}},
-                    QJsonObject{{QStringLiteral("role"), QStringLiteral("user")},
-                                {QStringLiteral("content"),
-                                 QString::fromUtf8(QJsonDocument(userPrompt).toJson(QJsonDocument::Compact))}}}}};
+    QJsonObject payload = extraBody.toObject();
+    payload.insert(QStringLiteral("model"), model);
+    payload.insert(QStringLiteral("temperature"),
+                   config.contains(QStringLiteral("temperature"))
+                       ? config.value(QStringLiteral("temperature")).toDouble(0.2)
+                       : 0.2);
+    payload.insert(QStringLiteral("messages"),
+                   QJsonArray{QJsonObject{{QStringLiteral("role"), QStringLiteral("system")},
+                                          {QStringLiteral("content"), systemPrompt}},
+                              QJsonObject{{QStringLiteral("role"), QStringLiteral("user")},
+                                          {QStringLiteral("content"),
+                                           QString::fromUtf8(QJsonDocument(userPrompt).toJson(QJsonDocument::Compact))}}});
 
     QNetworkRequest request(QUrl(apiBase + QStringLiteral("/chat/completions")));
     request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));

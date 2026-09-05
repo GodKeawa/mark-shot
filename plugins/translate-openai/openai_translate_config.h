@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QJsonValue>
 #include <QString>
 
 namespace markshot::translate_openai {
@@ -10,6 +11,8 @@ struct OpenAiTranslateConfig {
     QString apiKey;
     QString model = QStringLiteral("gpt-4o-mini");
     QString systemPrompt;
+    // Preserve invalid types until configuration validation.
+    QJsonValue extraBody{QJsonValue::Undefined};
     double temperature = 0.2;
     int timeoutMs = 60000;
 };

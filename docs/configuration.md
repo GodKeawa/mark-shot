@@ -129,6 +129,7 @@ Mark Shot reads application settings from `~/.config/mark-shot/config.json` on L
     "apiKey": "",
     "model": "gpt-4o-mini",
     "temperature": 0.2,
+    "extraBody": {},
     "timeoutMs": 60000,
     "timeoutSeconds": 60,
     "systemPrompt": "",
@@ -141,6 +142,29 @@ Mark Shot reads application settings from `~/.config/mark-shot/config.json` on L
 ```
 
 Translation runs through provider plugins. See the [translation provider guide](translation-providers.md) for the `translation.provider` selection order, the Tencent, Baidu, and Youdao credential fields, their environment variables, and the per-vendor language codes.
+
+`translation.extraBody` adds JSON fields to the top level of OpenAI-compatible request bodies, for both the plugin and the built-in implementation. Edit this field directly in `config.json`; there is no settings control. For an API that supports it, use `"extraBody": {"enable_thinking": false}` to request disabling thinking. Other APIs may require `"extraBody": {"reasoning_effort": "none"}` instead. These fields and values depend on the API provider and model; they are not universal and may be rejected or ignored.
+
+The default is `{}`. Omitting the field or using an empty object preserves existing requests. Nested JSON values are passed through unchanged, but `model`, `temperature`, and `messages` always come from the application and cannot be overridden here. Non-object values (including `null`) cause a configuration error before sending a request. Only the shared `translation.extraBody` field is read, not `translation.openai.extraBody`. This feature does not apply to other translation providers, the helper, or a custom `translation.command`. Unsupported API fields follow the existing request error handling; they are not automatically removed and retried. Remove `extraBody` to restore the original request body.
+
+For APIs that use `thinking.type`, the following configuration disables thinking and sets the temperature to `0`. Merge these fields into your existing `translation` object, keeping the API URL, credentials, and model; do not replace the entire configuration file with this snippet:
+
+```json
+{
+  "translation": {
+    "temperature": 0,
+    "extraBody": {
+      "thinking": {
+        "type": "disabled"
+      }
+    }
+  }
+}
+```
+
+To enable thinking, change `"disabled"` to `"enabled"`; do not use the literal value `"enabled/disabled"`. Set the temperature at `translation.temperature`; a `temperature` field inside `extraBody` is overwritten by the application. Check the provider's documentation to confirm that the model supports temperature `0` and allows it alongside the thinking parameter.
+
+`extraBody` accepts multiple comma-separated fields, all merged into a single request body rather than sent as separate bodies. For example, only if the API supports both parameters together, use `"extraBody": {"thinking": {"type": "disabled"}, "max_tokens": 1024}`. The outgoing request contains top-level `thinking` and `max_tokens` fields, without an outer `extraBody` field.
 
 | Configuration Key | Data Type | Default Value | Description |
 | :--- | :---: | :---: | :--- |

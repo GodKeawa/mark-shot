@@ -147,6 +147,7 @@ QJsonObject defaultAppConfigRoot(const QString &windowDetectionCommand)
     translation.insert(QStringLiteral("apiKey"), QString());
     translation.insert(QStringLiteral("model"), QStringLiteral("gpt-4o-mini"));
     translation.insert(QStringLiteral("temperature"), 0.2);
+    translation.insert(QStringLiteral("extraBody"), QJsonObject());
     translation.insert(QStringLiteral("timeoutMs"), 60000);
     translation.insert(QStringLiteral("timeoutSeconds"), 60);
     translation.insert(QStringLiteral("systemPrompt"), QString());

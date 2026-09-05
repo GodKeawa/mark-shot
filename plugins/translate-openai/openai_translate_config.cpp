@@ -40,6 +40,7 @@ OpenAiTranslateConfig readOpenAiTranslateConfig()
         markshot::translate_common::readTranslateConfigSource(QStringLiteral("openai"));
 
     OpenAiTranslateConfig result;
+    result.extraBody = source.translation.value(QStringLiteral("extraBody"));
 
     // 1. apiBase 兼容旧配置使用的 baseUrl 键名
     QString apiBase = markshot::translate_common::configString(source, QStringLiteral("apiBase"), {});
@@ -83,6 +84,12 @@ OpenAiTranslateConfig readOpenAiTranslateConfig()
 
 bool validateOpenAiTranslateConfig(const OpenAiTranslateConfig &config, QString *error)
 {
+    if (!config.extraBody.isUndefined() && !config.extraBody.isObject()) {
+        if (error) {
+            *error = QStringLiteral("translation.extraBody must be a JSON object");
+        }
+        return false;
+    }
     if (config.apiBase.trimmed().isEmpty()) {
         if (error) {
             *error = QStringLiteral("missing translation apiBase");
