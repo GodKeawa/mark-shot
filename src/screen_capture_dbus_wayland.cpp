@@ -4,10 +4,13 @@
 #include "capture_own_windows_guard.h"
 #include "kde_capture_config.h"
 
+#ifdef MARK_SHOT_WITH_DBUS
+// QtDBus 在 Windows 构建中不可用，D-Bus 专属头文件必须跟随开关引入
 #include <QDBusConnectionInterface>
 #include <QElapsedTimer>
 #include <QMutex>
 #include <QMutexLocker>
+#endif
 
 /// @brief Captures the screen using the grim utility.
 /// @param request The capture request details such as source geometry and output name.
