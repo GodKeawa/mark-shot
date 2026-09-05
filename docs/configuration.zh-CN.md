@@ -147,6 +147,25 @@ Mark Shot 在 Linux 上从 `~/.config/mark-shot/config.json` 读取应用配置�
 
 默认值为 `{}`，省略字段或使用空对象均保持原有请求不变。嵌套 JSON 值原样透传，但 `model`、`temperature` 和 `messages` 始终由程序写入，不能在此覆盖。非对象值（包括 `null`）会在发送请求前报配置错误。只读取公共字段 `translation.extraBody`，不读取 `translation.openai.extraBody`。此功能不适用于其他翻译服务、helper 或自定义 `translation.command`。API 不支持的字段沿用现有请求错误处理，不会自动删除参数重试；删除 `extraBody` 即可恢复原有请求体。
 
+对于使用 `thinking.type` 的 API，关闭思考并将温度设为 `0` 的配置如下。将这些字段合入现有 `translation` 对象，保留已有地址、密钥和模型，不要用此片段替换整个配置文件：
+
+```json
+{
+  "translation": {
+    "temperature": 0,
+    "extraBody": {
+      "thinking": {
+        "type": "disabled"
+      }
+    }
+  }
+}
+```
+
+开启思考时，将 `"disabled"` 改为 `"enabled"`，不要填写 `"enabled/disabled"`。温度应写在 `translation.temperature`；即使在 `extraBody` 中填写 `temperature`，也会被程序覆盖。模型是否支持温度 `0`、能否与思考参数同时使用，仍需以服务商文档为准。
+
+`extraBody` 支持多个字段，用逗号分隔即可；它们会合并成同一个请求体，不是发送多个 body。例如，仅在 API 同时支持这些参数时，可使用 `"extraBody": {"thinking": {"type": "disabled"}, "max_tokens": 1024}`。最终请求体包含顶层 `thinking` 和 `max_tokens`，不会包含外层的 `extraBody` 字段。
+
 | 配置项键名 | 数据类型 | 默认值 | 功能描述 |
 | :--- | :---: | :---: | :--- |
 | `env` | 对象 | `{}` | 在创建 `QApplication` 之前应用到进程的环境变量（例如设置 `"QT_FONT_DPI": 96` 来规避高 DPI 缩放带来的截图边界偏移）。别名：`environment`。 |
