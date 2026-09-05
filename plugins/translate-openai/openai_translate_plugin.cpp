@@ -53,15 +53,15 @@ QByteArray requestPayload(const OpenAiTranslateConfig &config,
                     QStringLiteral("Do not add explanations.")}},
         {QStringLiteral("segments"), segmentArray}};
 
-    const QJsonObject payload{
-        {QStringLiteral("model"), config.model},
-        {QStringLiteral("temperature"), config.temperature},
-        {QStringLiteral("messages"),
-         QJsonArray{QJsonObject{{QStringLiteral("role"), QStringLiteral("system")},
-                                {QStringLiteral("content"), config.systemPrompt}},
-                    QJsonObject{{QStringLiteral("role"), QStringLiteral("user")},
-                                {QStringLiteral("content"),
-                                 QString::fromUtf8(QJsonDocument(userPrompt).toJson(QJsonDocument::Compact))}}}}};
+    QJsonObject payload = config.extraBody.toObject();
+    payload.insert(QStringLiteral("model"), config.model);
+    payload.insert(QStringLiteral("temperature"), config.temperature);
+    payload.insert(QStringLiteral("messages"),
+                   QJsonArray{QJsonObject{{QStringLiteral("role"), QStringLiteral("system")},
+                                          {QStringLiteral("content"), config.systemPrompt}},
+                              QJsonObject{{QStringLiteral("role"), QStringLiteral("user")},
+                                          {QStringLiteral("content"),
+                                           QString::fromUtf8(QJsonDocument(userPrompt).toJson(QJsonDocument::Compact))}}});
     return QJsonDocument(payload).toJson(QJsonDocument::Compact);
 }
 

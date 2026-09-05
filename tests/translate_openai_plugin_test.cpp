@@ -1,6 +1,7 @@
 #include "openai_translate_config.h"
 #include "openai_translate_plugin.h"
 #include "openai_translation_parser.h"
+#include "providers/translate/translate_openai_task.h"
 
 #include <QtTest/QtTest>
 
@@ -126,9 +127,11 @@ private:
 /**
  * 写入临时 Mark Shot 配置。
  * @param apiBase API 根地址。
+ * @param extraBody 额外请求体，Undefined 表示省略该字段。
  * @return 临时配置文件。
  */
-QTemporaryFile *writeTempConfig(const QString &apiBase)
+QTemporaryFile *writeTempConfig(const QString &apiBase,
+                               const QJsonValue &extraBody = QJsonValue(QJsonValue::Undefined))
 {
     auto *file = new QTemporaryFile();
     if (!file->open()) {
@@ -141,6 +144,7 @@ QTemporaryFile *writeTempConfig(const QString &apiBase)
     translation.insert(QStringLiteral("model"), QStringLiteral("test-model"));
     translation.insert(QStringLiteral("temperature"), 0.0);
     translation.insert(QStringLiteral("timeoutMs"), 5000);
+    translation.insert(QStringLiteral("extraBody"), extraBody);
     QJsonObject root;
     root.insert(QStringLiteral("translation"), translation);
     file->write(QJsonDocument(root).toJson(QJsonDocument::Compact));
@@ -154,6 +158,120 @@ class TranslateOpenAiPluginTest : public QObject {
     Q_OBJECT
 
 private slots:
+    void extraBodyRequests_data()
+    {
+        QTest::addColumn<QJsonValue>("extraBody");
+        QTest::newRow("missing") << QJsonValue(QJsonValue::Undefined);
+        QTest::newRow("empty") << QJsonValue(QJsonObject());
+        QTest::newRow("extensions") << QJsonValue(QJsonObject{
+            {QStringLiteral("enable_thinking"), false},
+            {QStringLiteral("reasoning_effort"), QStringLiteral("none")},
+            {QStringLiteral("nested"), QJsonObject{
+                {QStringLiteral("values"), QJsonArray{false, 2, QStringLiteral("text"), QJsonValue()}}}}});
+        QTest::newRow("protected-fields") << QJsonValue(QJsonObject{
+            {QStringLiteral("model"), QStringLiteral("wrong-model")},
+            {QStringLiteral("temperature"), 99},
+            {QStringLiteral("messages"), QJsonArray()},
+            {QStringLiteral("enable_thinking"), false}});
+        QTest::newRow("null") << QJsonValue(QJsonValue::Null);
+        QTest::newRow("array") << QJsonValue(QJsonArray());
+        QTest::newRow("string") << QJsonValue(QStringLiteral("{}"));
+        QTest::newRow("number") << QJsonValue(1);
+        QTest::newRow("boolean") << QJsonValue(false);
+    }
+
+    void extraBodyRequests()
+    {
+        QFETCH(QJsonValue, extraBody);
+        const bool valid = extraBody.isUndefined() || extraBody.isObject();
+        const QString expectedError = QStringLiteral("translation.extraBody must be a JSON object");
+        const QJsonObject message{
+            {QStringLiteral("content"), QStringLiteral("{\"translations\":[{\"id\":7,\"text\":\"translated\"}]}")}};
+        const QJsonObject choice{{QStringLiteral("message"), message}};
+        const QByteArray response = QJsonDocument(
+            QJsonObject{{QStringLiteral("choices"), QJsonArray{choice}}}).toJson();
+        QJsonObject pluginPayload;
+        for (const bool builtin : {false, true}) {
+            MockChatServer server(response);
+            QVERIFY(server.start());
+            QSignalSpy connections(&server, &QTcpServer::newConnection);
+            std::unique_ptr<QTemporaryFile> config(writeTempConfig(server.baseUrl(), extraBody));
+            QVERIFY(config != nullptr);
+            EnvGuard configGuard(QByteArrayLiteral("MARK_SHOT_CONFIG"), config->fileName().toUtf8());
+
+            if (builtin) {
+                markshot::providers::TranslateOpenAiTask task(
+                    QByteArrayLiteral("{\"tokens\":[{\"text\":\"hello\",\"line\":7,\"box\":[0,0,50,20]}]}"),
+                    QStringLiteral("Simplified Chinese"), config->fileName());
+                task.start(5000);
+                const auto result = task.waitForResult();
+                QCOMPARE(result.ok, valid);
+                if (valid) {
+                    const QJsonArray tokens = QJsonDocument::fromJson(result.output).object()
+                                                  .value(QStringLiteral("tokens")).toArray();
+                    QCOMPARE(tokens.size(), 1);
+                    QCOMPARE(tokens.first().toObject().value(QStringLiteral("text")).toString(),
+                             QStringLiteral("translated"));
+                } else {
+                    QCOMPARE(result.error, markshot::providers::TaskError::Failed);
+                    QCOMPARE(QString::fromUtf8(result.errorOutput), expectedError);
+                }
+            } else {
+                OpenAiTranslatePlugin plugin;
+                QString error;
+                QCOMPARE(plugin.isAvailable(&error), valid);
+                if (!valid) {
+                    QCOMPARE(error, expectedError);
+                }
+                QVector<markshot::plugin::TranslateSegment> translations;
+                QCOMPARE(plugin.translate({{7, QStringLiteral("hello")}},
+                                          QStringLiteral("Simplified Chinese"), &translations, &error), valid);
+                if (valid) {
+                    QCOMPARE(translations.size(), 1);
+                    QCOMPARE(translations.first().id, 7);
+                    QCOMPARE(translations.first().text, QStringLiteral("translated"));
+                } else {
+                    QCOMPARE(error, expectedError);
+                    QVERIFY(translations.isEmpty());
+                }
+            }
+            if (!valid) {
+                QCoreApplication::processEvents();
+                QCOMPARE(connections.count(), 0);
+                QVERIFY(server.requestBody().isEmpty());
+                continue;
+            }
+
+            const QJsonObject payload = QJsonDocument::fromJson(server.requestBody()).object();
+            QCOMPARE(payload.value(QStringLiteral("model")).toString(), QStringLiteral("test-model"));
+            QCOMPARE(payload.value(QStringLiteral("temperature")), QJsonValue(0.0));
+            const QJsonArray messages = payload.value(QStringLiteral("messages")).toArray();
+            QCOMPARE(messages.size(), 2);
+            QCOMPARE(messages.first().toObject(), (QJsonObject{
+                {QStringLiteral("role"), QStringLiteral("system")},
+                {QStringLiteral("content"), defaultSystemPrompt()}}));
+            QCOMPARE(messages.last().toObject().value(QStringLiteral("role")).toString(), QStringLiteral("user"));
+            const QJsonObject prompt = QJsonDocument::fromJson(
+                messages.last().toObject().value(QStringLiteral("content")).toString().toUtf8()).object();
+            QCOMPARE(prompt.value(QStringLiteral("target_language")).toString(), QStringLiteral("Simplified Chinese"));
+            QCOMPARE(prompt.value(QStringLiteral("segments")).toArray(),
+                     (QJsonArray{QJsonObject{{QStringLiteral("id"), 7}, {QStringLiteral("text"), QStringLiteral("hello")}}}));
+            QCOMPARE(prompt.value(QStringLiteral("instructions")).toArray().size(), 3);
+            QJsonObject extensions = payload;
+            QJsonObject expectedExtensions = extraBody.toObject();
+            for (const QString &key : {QStringLiteral("model"), QStringLiteral("temperature"), QStringLiteral("messages")}) {
+                extensions.remove(key);
+                expectedExtensions.remove(key);
+            }
+            QCOMPARE(extensions, expectedExtensions);
+            if (builtin) {
+                QCOMPARE(payload, pluginPayload);
+            } else {
+                pluginPayload = payload;
+            }
+        }
+    }
+
     /**
      * 验证 Markdown 包裹的翻译 JSON 可被解析。
      * @return 无返回值。
