@@ -78,6 +78,32 @@ private slots:
     }
 
     /**
+     * 验证运行时导入失败后避开 DMA-BUF。
+     * @return 无返回值。
+     */
+    void avoidsDmaBufAfterRuntimeImportFailure()
+    {
+        markshot::pipewire::resetDmaBufImportBrokenForTest();
+        markshot::pipewire::DmaBufEnvironment environment;
+        environment.importBroken = false;
+        QVERIFY(!markshot::pipewire::shouldAvoidDmaBuf(environment));
+
+        // 1. 标记失败后同环境判定翻转
+        markshot::pipewire::markDmaBufImportBroken();
+        QVERIFY(markshot::pipewire::shouldAvoidDmaBuf(markshot::pipewire::currentDmaBufEnvironment()));
+
+        // 2. 无参重载同样生效
+        QVERIFY(markshot::pipewire::shouldAvoidDmaBuf());
+
+        // 3. 显式强制开关优先级仍高于失败标记
+        environment = markshot::pipewire::currentDmaBufEnvironment();
+        environment.forcedByEnvironment = true;
+        QVERIFY(!markshot::pipewire::shouldAvoidDmaBuf(environment));
+
+        markshot::pipewire::resetDmaBufImportBrokenForTest();
+    }
+
+    /**
      * 验证强制开关优先级高于自动规避。
      * @return 无返回值。
      */

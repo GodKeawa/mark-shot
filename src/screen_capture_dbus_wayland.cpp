@@ -4,6 +4,11 @@
 #include "capture_own_windows_guard.h"
 #include "kde_capture_config.h"
 
+#include <QDBusConnectionInterface>
+#include <QElapsedTimer>
+#include <QMutex>
+#include <QMutexLocker>
+
 /// @brief Captures the screen using the grim utility.
 /// @param request The capture request details such as source geometry and output name.
 /// @return The result of the screen capture operation.
@@ -71,15 +76,52 @@ CaptureResult captureWithGrim(const CaptureRequest &request)
 
 #ifdef MARK_SHOT_WITH_DBUS
 
+namespace {
+
+// KWin 可用性探测的缓存时长。D-Bus 服务列表在会话内基本不变，而滚动
+// 捕获每个 tick 都会询问；短 TTL 只用于消化 KWin 重启等罕见变化。
+constexpr int kKWinProbeCacheMs = 5000;
+
+/**
+ * 读取带 TTL 的 KWin ScreenShot2 可用性缓存。
+ * @param available 探测到的新结果，空值表示只读缓存。
+ * @return 缓存有效期内的可用性，过期且未更新时返回空值。
+ */
+std::optional<bool> kwinProbeCache(std::optional<bool> available)
+{
+    static QMutex mutex;
+    static QElapsedTimer timer;
+    static bool cached = false;
+
+    QMutexLocker locker(&mutex);
+    if (available.has_value()) {
+        cached = *available;
+        timer.restart();
+        return available;
+    }
+    if (!timer.isValid() || timer.elapsed() >= kKWinProbeCacheMs) {
+        return std::nullopt;
+    }
+    return cached;
+}
+
+}  // namespace
+
 /// @brief 判断 KWin ScreenShot2 DBus 接口是否可用。
 /// @return 接口存在时返回 true。
 bool isKWinScreenShotAvailable()
 {
-    QDBusInterface kwin(QStringLiteral("org.kde.KWin.ScreenShot2"),
-                        QStringLiteral("/org/kde/KWin/ScreenShot2"),
-                        QStringLiteral("org.kde.KWin.ScreenShot2"),
-                        QDBusConnection::sessionBus());
-    return kwin.isValid();
+    // 1. 命中缓存时跳过 D-Bus 往返，滚动捕获热路径不再逐帧探测
+    if (const std::optional<bool> cached = kwinProbeCache(std::nullopt)) {
+        return *cached;
+    }
+
+    // 2. 用服务注册表判断，避免 QDBusInterface 构造触发同步 Introspect 往返
+    const bool available =
+        QDBusConnection::sessionBus().interface()->isServiceRegistered(
+            QStringLiteral("org.kde.KWin.ScreenShot2"));
+    kwinProbeCache(available);
+    return available;
 }
 
 /// @brief 使用 KWin ScreenShot2 接口截取指定 Wayland 区域。
@@ -210,19 +252,21 @@ CaptureResult captureWaylandFrame(const CaptureRequest &request)
     const bool kdeSession = isKdePlasma();
     const bool kwinConfigured = markshot::configuredKdeKWinScreenshotEnabled();
     const bool kwinAvailable = kwinConfigured ? isKWinScreenShotAvailable() : false;
-    markshot::debugLog("capture",
-                       "wayland-frame geom=%d,%d %dx%d output=%s all_outputs=%d "
-                       "prefer_screencast=%d allow_interactive=%d allow_screenshot_fallback=%d "
-                       "prefers_grim=%d kde=%d kwin=%d kwin_configured=%d desktop_file=%s desktop=%s",
-                       request.sourceGeometry.x(), request.sourceGeometry.y(),
-                       request.sourceGeometry.width(), request.sourceGeometry.height(),
-                       request.preferredOutputName.toUtf8().constData(),
-                       request.allOutputs ? 1 : 0, request.preferScreencast ? 1 : 0,
-                       request.allowInteractivePortal ? 1 : 0,
-                       request.allowPortalScreenshotFallback ? 1 : 0, grimPreferred ? 1 : 0,
-                       kdeSession ? 1 : 0, kwinAvailable ? 1 : 0, kwinConfigured ? 1 : 0,
-                       QGuiApplication::desktopFileName().toUtf8().constData(),
-                       desktopEnvironmentText().toUtf8().constData());
+    if (markshot::debugEnabled()) {
+        markshot::debugLog("capture",
+                           "wayland-frame geom=%d,%d %dx%d output=%s all_outputs=%d "
+                           "prefer_screencast=%d allow_interactive=%d allow_screenshot_fallback=%d "
+                           "prefers_grim=%d kde=%d kwin=%d kwin_configured=%d desktop_file=%s desktop=%s",
+                           request.sourceGeometry.x(), request.sourceGeometry.y(),
+                           request.sourceGeometry.width(), request.sourceGeometry.height(),
+                           request.preferredOutputName.toUtf8().constData(),
+                           request.allOutputs ? 1 : 0, request.preferScreencast ? 1 : 0,
+                           request.allowInteractivePortal ? 1 : 0,
+                           request.allowPortalScreenshotFallback ? 1 : 0, grimPreferred ? 1 : 0,
+                           kdeSession ? 1 : 0, kwinAvailable ? 1 : 0, kwinConfigured ? 1 : 0,
+                           QGuiApplication::desktopFileName().toUtf8().constData(),
+                           desktopEnvironmentText().toUtf8().constData());
+    }
 
     if (isGnomeWaylandSession() && hasGnomeScrollHelper() && request.sourceGeometry.isValid()
         && !request.sourceGeometry.isEmpty() && !request.allOutputs) {

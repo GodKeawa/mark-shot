@@ -1,5 +1,9 @@
 #include "screen_capture_internal.h"
 
+#include <QElapsedTimer>
+#include <QMutex>
+#include <QMutexLocker>
+
 /// @brief Enumerates the geometries of all open X11 windows.
 /// @return A vector of rectangles representing the window geometries.
 QVector<QRect> enumerateX11WindowGeometries()
@@ -126,28 +130,112 @@ QVector<markshot::WindowInfo> enumerateX11WindowInfos()
 bool isGnomeWaylandSession()
 {
 #ifdef MARK_SHOT_WITH_DBUS
-    if (!isWaylandSession()) {
-        return false;
-    }
-    return desktopEnvironmentText().toLower().contains(QStringLiteral("gnome"));
+    // 判定结果在进程生命周期内不变；滚动捕获热路径每 tick 都会询问
+    static const bool gnome = [] {
+        if (!isWaylandSession()) {
+            return false;
+        }
+        return desktopEnvironmentText().toLower().contains(QStringLiteral("gnome"));
+    }();
+    return gnome;
 #else
     return false;
 #endif
 }
 
+#ifdef MARK_SHOT_WITH_DBUS
+
+namespace {
+
+// GNOME helper 版本探测的缓存时长与失败退避时长
+constexpr int kGnomeHelperProbeCacheMs = 5000;
+constexpr int kGnomeHelperFailureBackoffMs = 30000;
+
+/**
+ * 读取带 TTL 与失败退避的 GNOME helper 版本缓存。
+ * @param major 探测到的新版本号；空值表示只读缓存。
+ * @return 缓存有效期内的版本号，过期、失败退避中或未探测时返回空值。
+ */
+std::optional<int> gnomeHelperVersionCache(std::optional<int> major)
+{
+    static QMutex mutex;
+    static QElapsedTimer cacheTimer;
+    static QElapsedTimer failureTimer;
+    static int cachedVersion = 0;
+    static bool failed = false;
+
+    QMutexLocker locker(&mutex);
+    if (major.has_value()) {
+        cachedVersion = *major;
+        // 1. 版本号为 0 表示扩展缺失，进入失败退避
+        failed = cachedVersion <= 0;
+        if (failed) {
+            failureTimer.restart();
+            cacheTimer.invalidate();
+        } else {
+            // 2. 成功探测刷新普通 TTL 缓存
+            failureTimer.invalidate();
+            cacheTimer.restart();
+        }
+        return major;
+    }
+    if (failed && failureTimer.isValid()
+        && failureTimer.elapsed() < kGnomeHelperFailureBackoffMs) {
+        return 0;
+    }
+    if (!cacheTimer.isValid() || cacheTimer.elapsed() >= kGnomeHelperProbeCacheMs) {
+        return std::nullopt;
+    }
+    return cachedVersion;
+}
+
+/**
+ * 从 D-Bus 应答解析 GNOME helper 主版本号。
+ * @param reply Version 调用的应答。
+ * @return 扩展不可用或应答异常时返回 0。
+ */
+int gnomeScrollHelperMajorVersionFromReply(const QDBusMessage &reply)
+{
+    if (reply.type() == QDBusMessage::ErrorMessage || reply.arguments().isEmpty()) {
+        return 0;
+    }
+    const QString version = reply.arguments().first().toString();
+    bool ok = false;
+    const int major = version.section(QLatin1Char('.'), 0, 0).toInt(&ok);
+    return ok ? major : 0;
+}
+
+}  // namespace
+
+/**
+ * 探测 GNOME helper 主版本号并写入缓存。
+ * @return 扩展不可用时返回 0，否则返回语义版本中的主版本号。
+ */
+int gnomeHelperVersionFromSession()
+{
+    QDBusMessage message = QDBusMessage::createMethodCall(
+        QStringLiteral("org.gnome.Shell"),
+        QStringLiteral("/org/gnome/Shell/Extensions/MarkShotScrollHelper"),
+        QStringLiteral("org.gnome.Shell.Extensions.MarkShotScrollHelper"),
+        QStringLiteral("Version"));
+    const QDBusMessage reply = QDBusConnection::sessionBus().call(message, QDBus::Block, 3000);
+    const int major = gnomeScrollHelperMajorVersionFromReply(reply);
+    gnomeHelperVersionCache(major);
+    return major;
+}
+
+#endif
+
 bool hasGnomeScrollHelper()
 {
 #ifdef MARK_SHOT_WITH_DBUS
-    QDBusInterface helper(QStringLiteral("org.gnome.Shell"),
-                          QStringLiteral("/org/gnome/Shell/Extensions/MarkShotScrollHelper"),
-                          QStringLiteral("org.gnome.Shell.Extensions.MarkShotScrollHelper"),
-                          QDBusConnection::sessionBus());
-    if (!helper.isValid()) {
-        return false;
+    // 1. 命中缓存时跳过 D-Bus 往返；扩展未安装时按失败退避避免逐帧探测
+    if (const std::optional<int> cached = gnomeHelperVersionCache(std::nullopt)) {
+        return *cached > 0;
     }
 
-    QDBusMessage reply = helper.call(QStringLiteral("Version"));
-    return reply.type() != QDBusMessage::ErrorMessage && !reply.arguments().isEmpty();
+    // 2. 未命中缓存时探测一次并写回缓存
+    return gnomeHelperVersionFromSession() > 0;
 #else
     return false;
 #endif
@@ -158,23 +246,11 @@ bool hasGnomeScrollHelper()
 int gnomeScrollHelperMajorVersion()
 {
 #ifdef MARK_SHOT_WITH_DBUS
-    QDBusInterface helper(QStringLiteral("org.gnome.Shell"),
-                          QStringLiteral("/org/gnome/Shell/Extensions/MarkShotScrollHelper"),
-                          QStringLiteral("org.gnome.Shell.Extensions.MarkShotScrollHelper"),
-                          QDBusConnection::sessionBus());
-    if (!helper.isValid()) {
-        return 0;
+    // 命中缓存时跳过探测，滚动捕获热路径不再逐帧做 D-Bus 往返
+    if (const std::optional<int> cached = gnomeHelperVersionCache(std::nullopt)) {
+        return *cached;
     }
-
-    QDBusMessage reply = helper.call(QStringLiteral("Version"));
-    if (reply.type() == QDBusMessage::ErrorMessage || reply.arguments().isEmpty()) {
-        return 0;
-    }
-
-    const QString version = reply.arguments().first().toString();
-    bool ok = false;
-    const int major = version.section(QLatin1Char('.'), 0, 0).toInt(&ok);
-    return ok ? major : 0;
+    return gnomeHelperVersionFromSession();
 #else
     return 0;
 #endif

@@ -44,6 +44,9 @@ void ScrollSessionWindow::captureTick()
         request.allowPortalScreenshotFallback = false;
         request.allowInteractiveScreencastInit = m_interactiveScreencastInitPending;
         m_interactiveScreencastInitPending = false;
+        // 会话 tick 为 45ms（约 22fps），限制采集频率让 PipeWire 线程在
+        // 拷贝前丢弃过密帧，避免按合成器刷新率做无谓的整帧读回
+        request.targetFps = std::max(1, 1000 / std::max(1, kCaptureIntervalMs));
 
 #if defined(Q_OS_WIN)
         const bool makePanelTransparentForCapture = false;

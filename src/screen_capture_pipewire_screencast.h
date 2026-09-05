@@ -203,6 +203,8 @@ private:
     QImage m_latestFrame;
     qint64 m_latestFrameTimeMs = 0;
     QRect m_streamGeometry;
+    // 流格式协商完成后的几何缓存；格式变化时在 param_changed 回调中刷新
+    QRect m_negotiatedStreamGeometry;
     QRect m_rawRequestedGeometry;
     QString m_rawOutputName;
     qint64 m_rawBaseFrameTimeMs = -1;

@@ -3,6 +3,7 @@
 #ifdef HAVE_PIPEWIRE
 
 #include "debug_log.h"
+#include "pipewire/pipewire_dmabuf_policy.h"
 
 #include <cerrno>
 #include <cstdlib>
@@ -182,8 +183,7 @@ bool PortalPipeWireScreencast::rawFrameFromBuffer(pw_buffer *pipewireBuffer,
             return false;
         }
 
-        const QRect streamGeometry =
-            streamGeometryFromProperties(m_streamProperties, QSize(width, height));
+        const QRect streamGeometry = m_negotiatedStreamGeometry;
         const QRect sourceGeometry = streamGeometry.isEmpty()
             ? QRect(QPoint(0, 0), QSize(width, height))
             : streamGeometry;
@@ -247,7 +247,7 @@ bool PortalPipeWireScreencast::rawFrameFromBuffer(pw_buffer *pipewireBuffer,
     }
     frame->timestampMs = std::max<qint64>(0, frameTimeMs - m_rawBaseFrameTimeMs);
     if (frame->streamGeometry.isEmpty()) {
-        frame->streamGeometry = streamGeometryFromProperties(m_streamProperties, frame->size);
+        frame->streamGeometry = m_negotiatedStreamGeometry;
     }
     frame->outputName = m_rawOutputName;
     frame->cursorIncluded = m_cursorIncluded;
@@ -262,8 +262,7 @@ bool PortalPipeWireScreencast::readDmaBufRawFrame(const spa_buffer *spaBuffer,
     const int width = static_cast<int>(m_videoInfo.size.width);
     const int height = static_cast<int>(m_videoInfo.size.height);
     if (!m_rawDmaBufDirectReadBroken && width > 0 && height > 0) {
-        const QRect streamGeometry =
-            streamGeometryFromProperties(m_streamProperties, QSize(width, height));
+        const QRect streamGeometry = m_negotiatedStreamGeometry;
         const QRect sourceGeometry = streamGeometry.isEmpty()
             ? QRect(QPoint(0, 0), QSize(width, height))
             : streamGeometry;
@@ -295,6 +294,9 @@ bool PortalPipeWireScreencast::readDmaBufRawFrame(const spa_buffer *spaBuffer,
             }
             // 直读失败后记住结果，后续帧直接走回退路径避免重复失败开销
             m_rawDmaBufDirectReadBroken = true;
+            // EGL 层失败通常影响所有 DMA-BUF 导入，标记进程级失败让下一次
+            // 流协商直接改用共享内存，而不是在回退链上重复同样的错误
+            markshot::pipewire::markDmaBufImportBroken();
             markshot::debugLog("screencast",
                                "【录制】【PipeWire DMA-BUF】direct-read fallback error=%s",
                                directError.toUtf8().constData());
@@ -306,7 +308,7 @@ bool PortalPipeWireScreencast::readDmaBufRawFrame(const spa_buffer *spaBuffer,
     if (!m_rawRequestedGeometry.isEmpty()) {
         image = markshot::capture::cropFrameToRequest(
             image,
-            streamGeometryFromProperties(m_streamProperties, image.size()),
+            m_negotiatedStreamGeometry,
             m_rawRequestedGeometry);
     }
     if (!fillRawFrameFromImage(image, m_rawBufferPool, frame)) {

@@ -1,44 +1,87 @@
 #include "screen_capture_internal.h"
 
+namespace {
+
+/**
+ * 缓存进程启动时的会话类型判断。
+ *
+ * 会话类型在进程生命周期内不会改变，而滚动截图每 45ms 的捕获 tick 都会
+ * 询问该结果；每次都复制完整环境变量 map 会造成持续的无谓分配。
+ *
+ * @return 运行在 Wayland 会话时返回 true。
+ */
+bool cachedWaylandSession()
+{
+    static const bool wayland = [] {
+        const QString sessionType =
+            QProcessEnvironment::systemEnvironment()
+                .value(QStringLiteral("XDG_SESSION_TYPE"))
+                .toLower();
+        return sessionType == QStringLiteral("wayland");
+    }();
+    return wayland;
+}
+
+/**
+ * 缓存进程启动时的桌面环境标识文本。
+ *
+ * 环境变量在进程生命周期内视为不变；捕获热路径每次调用都重新拼接
+ * 7 个环境变量，这里只计算一次。
+ *
+ * @return 小写的桌面环境标识拼接结果。
+ */
+const QString &cachedDesktopEnvironmentText()
+{
+    static const QString text = [] {
+        const QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        return (env.value(QStringLiteral("XDG_CURRENT_DESKTOP")) + QLatin1Char(':')
+                + env.value(QStringLiteral("XDG_SESSION_DESKTOP")) + QLatin1Char(':')
+                + env.value(QStringLiteral("DESKTOP_SESSION")) + QLatin1Char(':')
+                + env.value(QStringLiteral("WAYLAND_DISPLAY"))
+                // Compositor socket env vars are more reliable than desktop names
+                // when XDG_CURRENT_DESKTOP is unset (common on bare niri/Hyprland).
+                + QLatin1Char(':') + env.value(QStringLiteral("NIRI_SOCKET"))
+                + QLatin1Char(':') + env.value(QStringLiteral("HYPRLAND_INSTANCE_SIGNATURE"))
+                + QLatin1Char(':') + env.value(QStringLiteral("SWAYSOCK")))
+            .toLower();
+    }();
+    return text;
+}
+
+}  // namespace
+
 bool isWaylandSession()
 {
-    const QString sessionType = QProcessEnvironment::systemEnvironment().value(QStringLiteral("XDG_SESSION_TYPE")).toLower();
-    return sessionType == QStringLiteral("wayland");
+    return cachedWaylandSession();
 }
 
 QString desktopEnvironmentText()
 {
-    const QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    return (env.value(QStringLiteral("XDG_CURRENT_DESKTOP")) + QLatin1Char(':')
-            + env.value(QStringLiteral("XDG_SESSION_DESKTOP")) + QLatin1Char(':')
-            + env.value(QStringLiteral("DESKTOP_SESSION")) + QLatin1Char(':')
-            + env.value(QStringLiteral("WAYLAND_DISPLAY"))
-            // Compositor socket env vars are more reliable than desktop names
-            // when XDG_CURRENT_DESKTOP is unset (common on bare niri/Hyprland).
-            + QLatin1Char(':') + env.value(QStringLiteral("NIRI_SOCKET"))
-            + QLatin1Char(':') + env.value(QStringLiteral("HYPRLAND_INSTANCE_SIGNATURE"))
-            + QLatin1Char(':') + env.value(QStringLiteral("SWAYSOCK")))
-        .toLower();
+    return cachedDesktopEnvironmentText();
 }
 
 bool prefersGrim()
 {
-    const QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    // Prefer compositor sockets even when desktop strings are empty/custom.
-    if (!env.value(QStringLiteral("NIRI_SOCKET")).isEmpty()
-        || !env.value(QStringLiteral("HYPRLAND_INSTANCE_SIGNATURE")).isEmpty()
-        || !env.value(QStringLiteral("SWAYSOCK")).isEmpty()) {
-        return true;
-    }
+    // 判定结果在进程生命周期内不变，随桌面环境文本一起只计算一次
+    static const bool grimPreferred = [] {
+        const QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        // Prefer compositor sockets even when desktop strings are empty/custom.
+        if (!env.value(QStringLiteral("NIRI_SOCKET")).isEmpty()
+            || !env.value(QStringLiteral("HYPRLAND_INSTANCE_SIGNATURE")).isEmpty()
+            || !env.value(QStringLiteral("SWAYSOCK")).isEmpty()) {
+            return true;
+        }
 
-    const QString desktop = desktopEnvironmentText();
-    return desktop.contains(QStringLiteral("sway"))
-        || desktop.contains(QStringLiteral("hyprland"))
-        || desktop.contains(QStringLiteral("niri"))
-        || desktop.contains(QStringLiteral("river"))
-        || desktop.contains(QStringLiteral("wayfire"))
-        || desktop.contains(QStringLiteral("labwc"))
-        || desktop.contains(QStringLiteral("wlroots"));
+        const QString desktop = cachedDesktopEnvironmentText();
+        return desktop.contains(QStringLiteral("sway"))
+            || desktop.contains(QStringLiteral("hyprland"))
+            || desktop.contains(QStringLiteral("niri"))
+            || desktop.contains(QStringLiteral("river"))
+            || desktop.contains(QStringLiteral("wayfire"))
+            || desktop.contains(QStringLiteral("labwc"))
+            || desktop.contains(QStringLiteral("wlroots"));
+    }();
+    return grimPreferred;
 }
 
 // KWin exposes org.kde.KWin.ScreenShot2, which can capture an exact pixel
@@ -48,8 +91,12 @@ bool prefersGrim()
 // outputs, so its crop math is unreliable here.
 bool isKdePlasma()
 {
-    const QString desktop = desktopEnvironmentText();
-    return desktop.contains(QStringLiteral("kde")) || desktop.contains(QStringLiteral("plasma"));
+    // 判定结果在进程生命周期内不变，滚动捕获热路径只读取缓存
+    static const bool kde = [] {
+        const QString desktop = desktopEnvironmentText();
+        return desktop.contains(QStringLiteral("kde")) || desktop.contains(QStringLiteral("plasma"));
+    }();
+    return kde;
 }
 
 QRect virtualScreensGeometry()

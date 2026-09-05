@@ -53,9 +53,8 @@ CaptureResult PortalPipeWireScreencast::capture(const CaptureRequest &request)
 
     if (firstStart) {
         markshot::debugLog("screencast",
-                           "settle-first-frame delay_ms=%lu",
-                           kScreencastFirstFrameSettleMs);
-        QThread::msleep(kScreencastFirstFrameSettleMs);
+                           "first-frame wait timeout_ms=%lu",
+                           kScreencastFirstFrameTimeoutMs);
     }
 
     QMutexLocker locker(&m_frameMutex);
@@ -67,7 +66,8 @@ CaptureResult PortalPipeWireScreencast::capture(const CaptureRequest &request)
     };
     if (!hasUsableFrame()) {
         waited = true;
-        const qint64 deadlineMs = QDateTime::currentMSecsSinceEpoch() + 2500;
+        const qint64 deadlineMs = QDateTime::currentMSecsSinceEpoch()
+            + static_cast<qint64>(kScreencastFirstFrameTimeoutMs);
         while (!hasUsableFrame()) {
             const qint64 remainingMs = deadlineMs - QDateTime::currentMSecsSinceEpoch();
             if (remainingMs <= 0) {
@@ -271,6 +271,7 @@ void PortalPipeWireScreencast::stop()
     m_latestFrame = {};
     m_latestFrameTimeMs = 0;
     m_streamGeometry = {};
+    m_negotiatedStreamGeometry = {};
 }
 
 bool PortalPipeWireScreencast::start(bool includeCursor, QString *error)

@@ -123,7 +123,9 @@ inline constexpr uint kPortalSourceMonitor = 1u;
 inline constexpr uint kPortalCursorHidden = 1u;
 inline constexpr uint kPortalCursorEmbedded = 2u;
 inline constexpr uint kPortalCursorMetadata = 4u;
-inline constexpr unsigned long kScreencastFirstFrameSettleMs = 1500;
+// 首帧等待超时。流启动后合成器通常在 1-2 个刷新周期内推帧，超时说明协商
+// 或授权存在问题；等待期间用条件变量轮询，不预先睡眠。
+inline constexpr unsigned long kScreencastFirstFrameTimeoutMs = 2500;
 
 // Small synchronous bridge for portal Response signals. Capture code starts a
 // nested event loop and exits it when this object emits finished().

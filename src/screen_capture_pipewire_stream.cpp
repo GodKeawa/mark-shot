@@ -326,6 +326,11 @@ void PortalPipeWireScreencast::onStreamParamChanged(void *data, uint32_t id, con
     }
 
     self->m_videoInfo = info;
+    // 流属性在流生命周期内不变，几何按协商结果缓存一次，帧回调直接复用
+    self->m_negotiatedStreamGeometry =
+        streamGeometryFromProperties(self->m_streamProperties,
+                                     QSize(static_cast<int>(info.size.width),
+                                           static_cast<int>(info.size.height)));
     const bool hasModifier = formatHasModifier(param);
     const int bytesPerPixel = rawBytesPerPixel(info.format);
     if (bytesPerPixel <= 0) {
@@ -438,7 +443,8 @@ void PortalPipeWireScreencast::onStreamProcess(void *data)
         QMutexLocker locker(&self->m_frameMutex);
         self->m_latestFrame = std::move(image);
         self->m_latestFrameTimeMs = frameTimeMs;
-        self->m_streamGeometry = streamGeometryFromProperties(self->m_streamProperties, self->m_latestFrame.size());
+        // 几何已在格式协商时缓存，帧回调只做一次原子性赋值
+        self->m_streamGeometry = self->m_negotiatedStreamGeometry;
         self->m_frameReady.wakeAll();
         self->m_frameCount += 1;
         if (self->m_frameCount == 1 || self->m_frameCount % 100 == 0) {
@@ -507,10 +513,15 @@ QImage PortalPipeWireScreencast::imageFromBuffer(pw_buffer *pipewireBuffer, QStr
             m_dmaBufImporter = std::make_unique<markshot::PipeWireDmaBufImporter>();
         }
         QImage imported = m_dmaBufImporter->importBuffer(spaBuffer, m_videoInfo, error);
-        if (imported.isNull() && error && !error->isEmpty()) {
-            // 部分 compositor 与驱动组合导不出可用的 DMA-BUF，提示可切换到共享内存重试
-            *error = QStringLiteral("%1（可设置 MARK_SHOT_DISABLE_DMABUF=1 改用共享内存后重试）")
-                         .arg(*error);
+        if (imported.isNull()) {
+            // 1. 导入失败与 compositor/驱动组合相关，标记后本次进程内的后续
+            //    流协商直接改用共享内存，避免每帧重复注定失败的 EGL 导入
+            markshot::pipewire::markDmaBufImportBroken();
+            if (error && !error->isEmpty()) {
+                // 2. 部分 compositor 与驱动组合导不出可用的 DMA-BUF，提示可切换到共享内存重试
+                *error = QStringLiteral("%1（可设置 MARK_SHOT_DISABLE_DMABUF=1 改用共享内存后重试）")
+                             .arg(*error);
+            }
         }
         return imported;
     }

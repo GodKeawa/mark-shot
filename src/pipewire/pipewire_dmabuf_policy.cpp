@@ -7,6 +7,8 @@
 #include <QStringList>
 #include <QtGlobal>
 
+#include <atomic>
+
 namespace markshot::pipewire {
 namespace {
 
@@ -40,6 +42,16 @@ int countRenderNodes()
 #endif
 }
 
+/**
+ * 保存进程级 DMA-BUF 导入失败标记。
+ * @return 失败标记对象。
+ */
+std::atomic_bool &dmaBufImportBroken()
+{
+    static std::atomic_bool broken{false};
+    return broken;
+}
+
 }  // namespace
 
 bool shouldAvoidDmaBuf(const DmaBufEnvironment &environment)
@@ -52,12 +64,17 @@ bool shouldAvoidDmaBuf(const DmaBufEnvironment &environment)
         return true;
     }
 
-    // 2. 已知失效组合：KWin 搭配 NVIDIA 专有驱动
+    // 2. 运行时导入已失败：同一进程内重试注定失败，直接改用共享内存
+    if (environment.importBroken) {
+        return true;
+    }
+
+    // 3. 已知失效组合：KWin 搭配 NVIDIA 专有驱动
     if (!environment.kdeSession || !environment.nvidiaProprietaryDriver) {
         return false;
     }
 
-    // 3. 混合显卡机器上 KWin 通常渲染在集显，DMA-BUF 可用，不做规避
+    // 4. 混合显卡机器上 KWin 通常渲染在集显，DMA-BUF 可用，不做规避
     return environment.renderNodeCount <= 1;
 }
 
@@ -74,12 +91,23 @@ DmaBufEnvironment currentDmaBufEnvironment()
     environment.renderNodeCount = countRenderNodes();
     environment.forcedByEnvironment = qEnvironmentVariableIsSet("MARK_SHOT_FORCE_DMABUF");
     environment.disabledByEnvironment = qEnvironmentVariableIsSet("MARK_SHOT_DISABLE_DMABUF");
+    environment.importBroken = dmaBufImportBroken().load(std::memory_order_acquire);
     return environment;
 }
 
 bool shouldAvoidDmaBuf()
 {
     return shouldAvoidDmaBuf(currentDmaBufEnvironment());
+}
+
+void markDmaBufImportBroken()
+{
+    dmaBufImportBroken().store(true, std::memory_order_release);
+}
+
+void resetDmaBufImportBrokenForTest()
+{
+    dmaBufImportBroken().store(false, std::memory_order_release);
 }
 
 }  // namespace markshot::pipewire
