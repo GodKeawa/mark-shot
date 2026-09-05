@@ -1,5 +1,13 @@
 # Release Notes
 
+### 0.1.51
+
+- **Translation Request Body Extensions**: `translation.extraBody` adds JSON fields to the top level of OpenAI-compatible translation requests, for both the built-in implementation and the plugin. The default is `{}`; `model`, `temperature`, and `messages` cannot be overridden. See the [configuration guide](configuration.md).
+- **Capture Hot-Path Caching**: Scroll capture no longer re-runs session and desktop detection, KWin ScreenShot2 probes, GNOME helper version calls, or config file reads on every tick.
+- **Faster First Screencast Frame**: The fixed settle delay is gone; the first-frame wait polls a condition variable and returns as soon as the frame arrives, with a 2500 ms timeout for stalled negotiations.
+- **KDE Window Hover Selection**: Fully occluded windows are filtered out, and window info is collected after the frame capture starts for fresher geometry.
+- **DMA-BUF Import Fallback**: A failed EGL import switches the process to shared memory for later negotiations instead of repeating the doomed import per frame.
+
 ### 0.1.50
 
 - **Tencent, Baidu, and Youdao Translation**: OCR translation now works with three Chinese machine translation services besides OpenAI-compatible endpoints. Enter credentials in Settings -> Integrations or through environment variables, and pick the service in Settings -> Plugins. See the [translation provider guide](translation-providers.md).

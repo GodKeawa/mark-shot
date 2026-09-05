@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.51 - 2026-09-06
+
+### Features & Enhancements
+
+- **Translation Request Body Extensions**: `translation.extraBody` merges extra JSON fields into the top level of OpenAI-compatible request bodies, for both the built-in translation task and the `translate-openai` plugin. The default is `{}`; omitting it or using an empty object preserves existing requests. `model`, `temperature`, and `messages` are always owned by the application, and a non-object value is reported as a configuration error before a request is sent. See [docs/configuration.md](docs/configuration.md).
+- **Capture Hot-Path Caching**: Scroll capture ticks no longer repeat environment probes. Wayland session and desktop detection, KWin ScreenShot2 availability, the GNOME helper version, and the KWin screenshot setting are cached (mtime-checked for the config file, short TTLs for D-Bus probes), removing per-frame file reads, JSON parsing, and D-Bus round trips.
+- **Faster First Screencast Frame**: The fixed 1500 ms settle sleep before the first screencast frame is replaced by a condition-variable wait with a single 2500 ms deadline, so capture returns as soon as the compositor delivers a frame instead of always paying the full delay.
+- **Negotiated Stream Geometry Cache**: PipeWire stream geometry is computed once at format negotiation and reused by every frame callback, instead of being re-parsed from stream properties on each frame.
+- **Scroll Capture Frame-Rate Cap**: Scroll capture requests a target FPS matching the session interval (about 22 fps at 45 ms), so dense frames are dropped inside PipeWire instead of triggering pointless full-frame readbacks.
+
+### Bug Fixes
+
+- **KDE Window Hover Selection**: Fully occluded windows are filtered out of KDE window detection, so hovering no longer selects a hidden window stacked underneath another one. Window info is also collected after the frame capture starts, giving fresher geometry for the overlay.
+- **DMA-BUF Import Fallback**: A failed EGL DMA-BUF import now sets a process-level broken marker, and the next stream negotiation falls back to shared memory instead of repeating the doomed import per frame.
+
 ## 0.1.50 - 2026-08-30
 
 ### Features & Enhancements

@@ -1,3 +1,12 @@
+mark-shot (0.1.51-0ppa1~resolute1) resolute; urgency=medium
+
+  * Cache capture-path environment and D-Bus probes for smoother scroll capture.
+  * Add the shared translation extraBody request extension for
+    OpenAI-compatible APIs.
+  * Filter fully occluded windows in KDE window detection.
+
+ -- Mark Shot maintainers <snemc@qq.com>  Sun, 06 Sep 2026 00:00:00 +0000
+
 mark-shot (0.1.50-0ppa1~resolute1) resolute; urgency=medium
 
   * Add the Tencent, Baidu, and Youdao translation provider plugins.
