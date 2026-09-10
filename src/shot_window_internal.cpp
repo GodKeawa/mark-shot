@@ -30,23 +30,34 @@ QString magnifierScaleText(qreal scale)
 /// @return Cursor used for selection and annotation drawing modes.
 QCursor captureCrossCursor()
 {
-    QPixmap pixmap(33, 33);
+    // Use 64x64 to guarantee 256-byte row pitch. 
+    // This fixes hardware cursor tearing/stride bugs on Hyprland/wlroots DRM backends
+    QPixmap pixmap(64, 64);
     pixmap.fill(Qt::transparent);
 
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing, false);
+    
+    // Draw the 32-pixel long crosshair in the center of the 64x64 canvas
+    const int c = 31;
+    const int min = 16;
+    const int max = 47;
+
     painter.setPen(QPen(QColor(15, 23, 42, 235), 5, Qt::SolidLine, Qt::SquareCap));
-    painter.drawLine(16, 0, 16, 32);
-    painter.drawLine(0, 16, 32, 16);
+    painter.drawLine(c, min, c, max);
+    painter.drawLine(min, c, max, c);
+    
     painter.setPen(QPen(QColor(255, 255, 255, 245), 3, Qt::SolidLine, Qt::SquareCap));
-    painter.drawLine(16, 0, 16, 32);
-    painter.drawLine(0, 16, 32, 16);
+    painter.drawLine(c, min, c, max);
+    painter.drawLine(min, c, max, c);
+    
     painter.setPen(QPen(QColor(45, 212, 191, 255), 1, Qt::SolidLine, Qt::SquareCap));
-    painter.drawLine(16, 0, 16, 32);
-    painter.drawLine(0, 16, 32, 16);
+    painter.drawLine(c, min, c, max);
+    painter.drawLine(min, c, max, c);
+    
     painter.end();
 
-    return QCursor(pixmap, 16, 16);
+    return QCursor(pixmap, c, c);
 }
 
 qreal normalizedRotationDegrees(qreal degrees)
