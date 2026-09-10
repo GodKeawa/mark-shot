@@ -32,32 +32,35 @@ QCursor captureCrossCursor()
 {
     // Use 64x64 to guarantee 256-byte row pitch. 
     // This fixes hardware cursor tearing/stride bugs on Hyprland/wlroots DRM backends
-    QPixmap pixmap(64, 64);
+    constexpr int canvasSize = 64;
+    constexpr int crossSize = 32;
+
+    QPixmap pixmap(canvasSize, canvasSize);
     pixmap.fill(Qt::transparent);
 
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing, false);
     
-    // Draw the 32-pixel long crosshair in the center of the 64x64 canvas
-    const int c = 31;
-    const int min = 16;
-    const int max = 47;
+    // Calculate drawing boundaries dynamically
+    constexpr int startPos = (canvasSize - crossSize) / 2;
+    constexpr int endPos = startPos + crossSize - 1;
+    constexpr int centerPos = (canvasSize - 1) / 2;
 
     painter.setPen(QPen(QColor(15, 23, 42, 235), 5, Qt::SolidLine, Qt::SquareCap));
-    painter.drawLine(c, min, c, max);
-    painter.drawLine(min, c, max, c);
+    painter.drawLine(centerPos, startPos, centerPos, endPos);
+    painter.drawLine(startPos, centerPos, endPos, centerPos);
     
     painter.setPen(QPen(QColor(255, 255, 255, 245), 3, Qt::SolidLine, Qt::SquareCap));
-    painter.drawLine(c, min, c, max);
-    painter.drawLine(min, c, max, c);
+    painter.drawLine(centerPos, startPos, centerPos, endPos);
+    painter.drawLine(startPos, centerPos, endPos, centerPos);
     
     painter.setPen(QPen(QColor(45, 212, 191, 255), 1, Qt::SolidLine, Qt::SquareCap));
-    painter.drawLine(c, min, c, max);
-    painter.drawLine(min, c, max, c);
+    painter.drawLine(centerPos, startPos, centerPos, endPos);
+    painter.drawLine(startPos, centerPos, endPos, centerPos);
     
     painter.end();
 
-    return QCursor(pixmap, c, c);
+    return QCursor(pixmap, centerPos, centerPos);
 }
 
 qreal normalizedRotationDegrees(qreal degrees)
