@@ -54,6 +54,7 @@ double sharpKernel(double distance)
 /// @return 已填充样本与范围的查找表
 AxisTable buildAxisTable(int inputSize, int outputSize, double sourceStart, double scale)
 {
+    // 1. 【截图】【视口缩放】根据缩放比例确定每个输出像素的采样范围
     AxisTable table;
     table.samples.resize(outputSize);
     table.first = inputSize;
@@ -65,6 +66,7 @@ AxisTable buildAxisTable(int inputSize, int outputSize, double sourceStart, doub
         const int first = std::max(0, static_cast<int>(std::floor(center - radius)));
         const int last = std::min(inputSize - 1, static_cast<int>(std::ceil(center + radius)));
 
+        // 2. 【截图】【视口缩放】累计范围内各输入像素的滤波权重
         double sum = 0.0;
         std::vector<AxisSample> samples;
         samples.reserve(std::max(0, last - first + 1));
@@ -77,6 +79,7 @@ AxisTable buildAxisTable(int inputSize, int outputSize, double sourceStart, doub
             sum += weight;
         }
 
+        // 3. 【截图】【视口缩放】归一化权重，无有效样本时使用最近像素
         if (samples.empty() || qFuzzyIsNull(sum)) {
             const int nearest = std::clamp(static_cast<int>(std::round(center)), 0, inputSize - 1);
             samples.push_back({nearest, 1.0});
@@ -134,6 +137,7 @@ void forRowRanges(int rowCount, Function function)
         return;
     }
 
+    // 1. 【截图】【视口缩放】按行数和可用线程数确定并发度
     const int idealThreads = std::max(1, QThread::idealThreadCount());
     const int threadCount = std::clamp(rowCount / kMinSharpRowsPerThread, 1, idealThreads);
     if (threadCount == 1) {
@@ -141,6 +145,7 @@ void forRowRanges(int rowCount, Function function)
         return;
     }
 
+    // 2. 【截图】【视口缩放】把全部行分配为互不重叠的处理区间
     std::vector<std::pair<int, int>> ranges;
     ranges.reserve(threadCount);
     const int rowsPerThread = rowCount / threadCount;
@@ -151,6 +156,7 @@ void forRowRanges(int rowCount, Function function)
         begin = end;
     }
 
+    // 3. 【截图】【视口缩放】并行处理各区间并等待所有任务完成
     QtConcurrent::blockingMap(ranges, [&function](const std::pair<int, int> &range) {
         function(range.first, range.second);
     });
